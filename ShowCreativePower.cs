@@ -147,20 +147,24 @@ public class ShowCreativePower : TerrariaPlugin
         if (e.Data[2] != (byte)PacketTypes.WorldInfo) return;
 
         // 尝试从Netplay.Clients查找对应的玩家
-        int pIndex = Utils.FindIndexBySocket(e.RemoteClient);
-        if (pIndex < 0 || pIndex >= TShock.Players.Length) return;
+        if (e.RemoteClient < 0 || e.RemoteClient >= Netplay.Clients.Length) return;
+        var client = Netplay.Clients[e.RemoteClient];
+        if (client == null || !client.IsActive ||
+            client.Id < 0 || client.Id >= TShock.Players.Length) return;
+
+        // 判断玩家有效性
+        var plr = TShock.Players[client.Id];
+        if (plr == null || !plr.RealPlayer) return;
 
         try
         {
-            var plr = TShock.Players[pIndex];
-            if (plr == null || !plr.RealPlayer) return;
-
             // 检查是否有菜单开关标记
             byte menu = plr.GetData<byte>(Scp);
             if (menu == (byte)GameModeID.Normal) return;
 
             var packet = new Utils.BytePacket.WorldData(e.Data);
             packet.GameMode = menu;
+            //plr.SendMessage($"已修改玩家 {plr.Name} 的WorldInfo数据包！", color);
         }
         catch (Exception ex)
         {
@@ -200,7 +204,6 @@ public class ShowCreativePower : TerrariaPlugin
             byte[] powerData = data.ReadBytes((int)(data.Length - data.Position));
 
             var powerType = (GetDataHandlers.CreativePowerTypes)powerId;
-            TShock.Log.ConsoleDebug($"[插件模板] {player.Name} 使用了力量: {powerType}");
 
             switch (powerType)
             {

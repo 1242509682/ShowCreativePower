@@ -488,29 +488,6 @@ internal class Utils
     }
     #endregion
 
-    #region 通过套接字ID查找玩家索引
-    public static int FindIndexBySocket(int socketId)
-    {
-        if (socketId >= 0 && socketId < Netplay.Clients.Length)
-        {
-            var client = Netplay.Clients[socketId];
-            if (client != null && client.IsActive)
-            {
-                for (int i = 0; i < Main.maxPlayers; i++)
-                {
-                    if (TShock.Players[i] != null &&
-                        TShock.Players[i].Index >= 0 &&
-                        TShock.Players[i].TPlayer.whoAmI == client.Id)
-                    {
-                        return i;
-                    }
-                }
-            }
-        }
-        return -1;
-    }
-    #endregion
-
     #region 将字符串换行
     public static List<string> WarpLines(List<string> lines, int column = 5)
     {
@@ -561,69 +538,59 @@ internal class Utils
             return (idx, (int)num | (b << 28));
         }
 
+        #region 世界数据包结构
         internal ref struct WorldData
         {
-            public byte[] Data { get; }
-            private Span<byte> DataSpan;
+            private readonly byte[] data;
 
             public WorldData(byte[] byteData)
             {
-                Data = byteData;
-                DataSpan = new Span<byte>(Data);
+                data = byteData;
             }
 
-            private const int PacketLengthOffset = 0;
-            private const int MessageIDOffset = PacketLengthOffset + sizeof(short);
-            private const int TimeOffset = MessageIDOffset + sizeof(byte);
-            private const int Flag1Offset = TimeOffset + sizeof(int);
-            private const int MoonPhaseOffset = Flag1Offset + sizeof(byte);
-            private const int MaxTileXOffset = MoonPhaseOffset + sizeof(byte);
-            private const int MaxTileYOffset = MaxTileXOffset + sizeof(short);
-            private const int SpawnTileXOffset = MaxTileYOffset + sizeof(short);
-            private const int SpawnTileYOffset = SpawnTileXOffset + sizeof(short);
-            private const int WorldSurfaceOffset = SpawnTileYOffset + sizeof(short);
-            private const int RockLayerOffset = WorldSurfaceOffset + sizeof(short);
-            private const int WorldIDOffset = RockLayerOffset + sizeof(short);
-            private const int WorldNameOffset = WorldIDOffset + sizeof(int);
-
-            private int _GameModeOffset = -1;
-            private int GameModeOffset
+            // 计算GameMode字段的偏移量
+            private int GetGameModeOffset()
             {
-                get
+                int offset = 3; // 跳过包头
+
+                // 跳过时间(4) + 标志(1) + 月相(1)
+                offset += 4 + 1 + 1;
+
+                // 跳过世界尺寸(2+2) + 出生点(2+2) + 地表(2) + 岩石层(2) + 世界ID(4)
+                offset += 2 + 2 + 2 + 2 + 2 + 2 + 4;
+
+                // 跳过世界名称（7位编码长度前缀 + 字符串）
+                offset += SkipString(data, offset);
+
+                return offset; // 这就是GameMode字段的位置
+            }
+
+            private static int SkipString(byte[] data, int offset)
+            {
+                int idx = 0;
+                int length = 0;
+
+                // 读取7位编码的长度
+                while (true)
                 {
-                    if (_GameModeOffset == -1)
-                    {
-                        // 正确计算字符串后的偏移量
-                        int stringEndOffset = SkipString(WorldNameOffset);
-                        _GameModeOffset = stringEndOffset;
-                    }
-                    return _GameModeOffset;
+                    byte b = data[offset + idx];
+                    length |= (b & 0x7F) << (7 * idx);
+                    idx++;
+
+                    if ((b & 0x80) == 0) break;
                 }
+
+                return idx + length;
             }
 
-            // 跳过字符串并返回字符串结束后的位置
-            private int SkipString(int offset)
+            // GameMode属性
+            public byte GameMode
             {
-                // 读取7位编码的长度前缀
-                var (lengthPrefixSize, stringLength) = Read7BitEncodedInt(DataSpan[offset..]);
-
-                // 返回字符串结束后的位置
-                // offset: 字符串起始位置（长度前缀开始）
-                // lengthPrefixSize: 长度前缀占用的字节数
-                // stringLength: 字符串内容的字节数
-                return offset + lengthPrefixSize + stringLength;
+                get => data[GetGameModeOffset()];
+                set => data[GetGameModeOffset()] = value;
             }
-
-            // 修改后的属性访问器
-            public ref byte GameMode => ref DataSpan[GameModeOffset];
-
-            // 其他属性
-            public readonly ushort PacketLength => Unsafe.As<byte, ushort>(ref DataSpan[PacketLengthOffset]);
-            public readonly byte MessageID => Data[MessageIDOffset];
-            public ref int Time => ref Unsafe.As<byte, int>(ref DataSpan[TimeOffset]);
-            public ref short SpawnTileX => ref Unsafe.As<byte, short>(ref DataSpan[SpawnTileXOffset]);
-            public ref short SpawnTileY => ref Unsafe.As<byte, short>(ref DataSpan[SpawnTileYOffset]);
         }
+        #endregion
     }
     #endregion
 }

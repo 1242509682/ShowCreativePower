@@ -1,6 +1,4 @@
-﻿using System.IO.Streams;
-using System.Runtime.CompilerServices;
-using Microsoft.Xna.Framework;
+﻿using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.GameContent.NetModules;
 using Terraria.ID;
@@ -17,12 +15,14 @@ public class ShowCreativePower : TerrariaPlugin
     #region 插件信息
     public override string Name => "显示旅途力量";
     public override string Author => "羽学、西江小子";
-    public override Version Version => new(1, 0, 0);
+    public override Version Version => new(1, 0, 1);
     public override string Description => "在非旅途模式下显示旅途力量菜单";
     #endregion
 
     #region 全局字段
     public static string Scp => "scp";
+    public static HashSet<int> Join = new HashSet<int>();
+    public static string NeedFix => "fix";
     public static Color color => new(240, 250, 150);
     public static bool IsAdmin(TSPlayer plr) => plr.HasPermission($"{Scp}.admin");
     #endregion
@@ -35,8 +35,8 @@ public class ShowCreativePower : TerrariaPlugin
         GeneralHooks.ReloadEvent += ReloadConfig;
         ServerApi.Hooks.NetGreetPlayer.Register(this, OnGreetPlayer);
         GetDataHandlers.PlayerUpdate.Register(this.OnPlayerUpdate);
+        ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
         OTAPI.Hooks.NetMessage.SendBytes += OnSendBytes;
-        //GetDataHandlers.ReadNetModule.Register(this.OnReadNetModule);
         TShockAPI.Commands.ChatCommands.Add(new Command($"{Scp}.use", Commands.ScpCmd, Scp));
     }
 
@@ -47,8 +47,8 @@ public class ShowCreativePower : TerrariaPlugin
             GeneralHooks.ReloadEvent -= ReloadConfig;
             ServerApi.Hooks.NetGreetPlayer.Deregister(this, OnGreetPlayer);
             GetDataHandlers.PlayerUpdate.UnRegister(this.OnPlayerUpdate);
+            ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
             OTAPI.Hooks.NetMessage.SendBytes -= OnSendBytes;
-            //GetDataHandlers.ReadNetModule.UnRegister(this.OnReadNetModule);
             TShockAPI.Commands.ChatCommands.RemoveAll(x => x.CommandDelegate == Commands.ScpCmd);
         }
         base.Dispose(disposing);
@@ -69,18 +69,29 @@ public class ShowCreativePower : TerrariaPlugin
     }
     #endregion
 
-    #region 玩家进入服务器
+    #region 玩家进入与离开服务器
     private void OnGreetPlayer(GreetPlayerEventArgs args)
     {
         var plr = TShock.Players[args.Who];
         if (plr == null || !plr.RealPlayer || !plr.Active ||
             Config is null || !Config.Enabled) return;
 
+        // 检查玩家是否在名单中或为管理员 不是则返回
         if (!Config.PlayerNames.Contains(plr.Name) && !IsAdmin(plr)) return;
 
-        if (Config.AutoOpen) // 只有自动开启时才标记
+        if (Config.Join && !Join.Contains(plr.Index))
         {
-            plr.SetData(Scp, (byte)GameModeID.Creative);
+            Join.Add(plr.Index);
+        }
+    }
+
+    private void OnLeave(LeaveEventArgs args)
+    {
+        var plr = TShock.Players[args.Who];
+        if (plr != null)
+        {
+            // 移除标记
+            plr.RemoveData(NeedFix);
         }
     }
     #endregion
@@ -92,10 +103,11 @@ public class ShowCreativePower : TerrariaPlugin
         if (plr == null || !plr.RealPlayer ||
             Config is null || !Config.Enabled) return;
 
+        // 检查玩家是否在名单中或为管理员 不是则返回
         if (!Config.PlayerNames.Contains(plr.Name) && !IsAdmin(plr)) return;
 
         // 检查玩家是否刚加入且自动开启
-        if (plr.GetData<byte>(Scp) == (byte)GameModeID.Creative)
+        if (Join.Contains(plr.Index))
         {
             SwitchMenu(plr, true);
         }
@@ -105,40 +117,49 @@ public class ShowCreativePower : TerrariaPlugin
     #region 菜单开关方法
     internal static void SwitchMenu(TSPlayer plr, bool flag)
     {
-        byte mode = flag ? (byte)GameModeID.Creative : (byte)GameModeID.Normal;
-        string open = flag ? "[c/4296D2:开启]" : "[c/E34761:关闭]";
+        // 设置自动修改标记
+        plr.SetData(NeedFix, flag);
+
+        // 发送玩家信息更新包(帮助PC玩家显示力量菜单)
+        plr.TPlayer.difficulty = flag ? (byte)GameModeID.Creative : (byte)GameModeID.Normal;
+        NetMessage.SendData((int)PacketTypes.PlayerInfo, -1, -1, null, plr.Index);
 
         // 发送世界信息(帮助PE玩家显示力量菜单),OTAPI钩子的OnSendBytes方法会修改WorldInfo包
         if (Config.PE)
             NetMessage.SendData((int)PacketTypes.WorldInfo, plr.Index);
 
-        // 发送玩家信息更新包(帮助PC玩家显示力量菜单)
-        plr.TPlayer.difficulty = mode;
-        NetMessage.SendData((int)PacketTypes.PlayerInfo, -1, -1, null, plr.Index);
-
+        // 解锁全物品研究
         string mess = "";
         if (Config.Unlock && flag)
         {
+            var item = new Item();
             for (int i = 0; i < ItemID.Count; i++)
             {
-                var response = NetCreativeUnlocksModule.SerializeItemSacrifice(i, 9999);
+                if (Config.ItemList.Contains(i)) continue;
+
+                item.SetDefaults(i);
+                var response = NetCreativeUnlocksModule.SerializeItemSacrifice(i, item.maxStack);
                 NetManager.Instance.SendToClient(response, plr.Index);
             }
 
             mess += ",已为你[c/41D396:解锁所有]研究物品";
         }
 
+        string open = flag ? "[c/4296D2:开启]" : "[c/E34761:关闭]";
         plr.SendMessage($"\n旅途力量菜单已{open}" + mess, color);
-        plr.SendMessage("如果力量菜单消失，请用指令:[c/F5E44B:/scp on]", color);
 
-        plr.RemoveData(Scp); // 移除标记
+        // 移除加入标记
+        if (Join.Contains(plr.Index))
+        {
+            Join.Remove(plr.Index);
+        }
     }
     #endregion
 
     #region SendBytes钩子 - 修改WorldInfo方法
     public void OnSendBytes(object? sender, OTAPI.Hooks.NetMessage.SendBytesEventArgs e)
     {
-        if (!Config.Enabled || !Config.PE || e.Data == null || e.Data.Length < 2)
+        if (!Config.Enabled || !Config.PE || e.Data == null || e.Data.Length < 30)
         {
             return;
         }
@@ -147,7 +168,6 @@ public class ShowCreativePower : TerrariaPlugin
         if (e.Data[2] != (byte)PacketTypes.WorldInfo) return;
 
         // 尝试从Netplay.Clients查找对应的玩家
-        if (e.RemoteClient < 0 || e.RemoteClient >= Netplay.Clients.Length) return;
         var client = Netplay.Clients[e.RemoteClient];
         if (client == null || !client.IsActive ||
             client.Id < 0 || client.Id >= TShock.Players.Length) return;
@@ -158,72 +178,15 @@ public class ShowCreativePower : TerrariaPlugin
 
         try
         {
-            // 检查是否有菜单开关标记
-            byte menu = plr.GetData<byte>(Scp);
-            if (menu == (byte)GameModeID.Normal) return;
+            // 检查玩家是否应该显示菜单
+            if (!plr.GetData<bool>(NeedFix)) return;
 
             var packet = new Utils.BytePacket.WorldData(e.Data);
-            packet.GameMode = menu;
-            //plr.SendMessage($"已修改玩家 {plr.Name} 的WorldInfo数据包！", color);
+            packet.GameMode = (byte)GameModeID.Creative;
         }
         catch (Exception ex)
         {
             TShock.Log.ConsoleError($"修改WorldInfo数据包失败: {ex}");
-        }
-    }
-    #endregion
-
-    #region 监听创意模式网络模块事件
-    private void OnReadNetModule(object? sender, GetDataHandlers.ReadNetModuleEventArgs e)
-    {
-        var plr = e.Player;
-        if (plr == null || !plr.RealPlayer || Config is null || !Config.Enabled) return;
-
-        switch (e.ModuleType)
-        {
-            case GetDataHandlers.NetModuleType.CreativePowers:
-                plr.SendMessage("您正在使用旅途模式力量菜单！", color);
-                ParseCreativePowerData(plr, e.Data);
-                break;
-            case GetDataHandlers.NetModuleType.CreativeUnlocks:
-                plr.SendMessage($"您正在进行研究解锁", color);
-                break;
-            case GetDataHandlers.NetModuleType.CreativePowerPermissions:
-                plr.SendMessage($"您正在修改力量权限", color);
-                break;
-        }
-    }
-
-    private void ParseCreativePowerData(TSPlayer player, MemoryStream data)
-    {
-        try
-        {
-            data.Position = 0;
-            data.ReadInt16();
-            short powerId = data.ReadInt16();
-            byte[] powerData = data.ReadBytes((int)(data.Length - data.Position));
-
-            var powerType = (GetDataHandlers.CreativePowerTypes)powerId;
-
-            switch (powerType)
-            {
-                case GetDataHandlers.CreativePowerTypes.FreezeTime:
-                    bool freeze = BitConverter.ToBoolean(powerData, 0);
-                    player.SendInfoMessage($"您{(freeze ? "冻结" : "解冻")}了时间");
-                    break;
-                case GetDataHandlers.CreativePowerTypes.Godmode:
-                    bool godmode = BitConverter.ToBoolean(powerData, 0);
-                    player.SendInfoMessage($"您{(godmode ? "开启" : "关闭")}了上帝模式");
-                    break;
-                case GetDataHandlers.CreativePowerTypes.SetSpawnRate:
-                    float spawnRate = BitConverter.ToSingle(powerData, 0);
-                    player.SendInfoMessage($"您设置了刷怪率: {spawnRate}");
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            TShock.Log.Error($"解析创意力量数据失败: {ex}");
         }
     }
     #endregion

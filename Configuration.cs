@@ -1,5 +1,4 @@
-﻿using System.ComponentModel;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using TShockAPI;
 
 namespace Plugin;
@@ -8,16 +7,20 @@ internal class Configuration
 {
     public static readonly string FilePath = Path.Combine(TShock.SavePath, "显示旅途力量.json");
 
-    [JsonProperty("插件开关", Order = 0)]
+    [JsonProperty("插件开关", Order = -1)]
     public bool Enabled { get; set; } = true;
-    [JsonProperty("允许手游显示力量菜单", Order = 1)]
+    [JsonProperty("允许手游显示力量菜单", Order = 0)]
     public bool PE { get; set; } = true;
     [JsonProperty("解锁全物品研究", Order = 1)]
     public bool Unlock { get; set; } = true;
     [JsonProperty("进服自动显示菜单", Order = 2)]
-    public bool AutoOpen { get; set; } = true;
-    [JsonProperty("旅途力量名单", Order = 3)]
+    public bool Join { get; set; } = true;
+    [JsonProperty("名单与物品每行显示数量", Order = 3)]
+    public int Lines { get; set; } = 10;
+    [JsonProperty("旅途力量名单", Order = 4)]
     public List<string> PlayerNames = new List<string>();
+    [JsonProperty("研究物品排除表", Order = 5)]
+    public List<int> ItemList = new List<int>();
 
     #region 预设参数方法
     public void SetDefault()
@@ -26,6 +29,11 @@ internal class Configuration
         {
             "羽学", "西江",
             "灵乐", "安安",
+        };
+
+        ItemList = new List<int>
+        {
+            74,73,72,71,
         };
     }
     #endregion

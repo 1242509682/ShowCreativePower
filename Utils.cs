@@ -1,7 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -13,136 +10,6 @@ namespace Plugin;
 
 internal class Utils
 {
-    #region 性能测试
-    public static void Debug()
-    {
-        TSPlayer[] plrs = TShock.Players;
-        string name = "灵乐";
-
-        // 预热
-        TSPlayer.All.SendMessage($"测试开始", color);
-
-        // 创建总计时器
-        var totalSw = Stopwatch.StartNew();
-
-        // 创建计时器
-        var sw = Stopwatch.StartNew();
-
-        TSPlayer? plr = null;
-
-        // 1. Array.Find
-        sw.Start();
-        plr = Array.Find(plrs, p => p != null && p.Active && p.Name == name);
-        sw.Stop();
-        plr?.SendMessage($"1.[Array] Array.Find: [c/4297D2:{sw.Elapsed}]", color);
-
-        // 2. LINQ FirstOrDefault
-        sw.Restart();
-        plr = plrs.FirstOrDefault(p => p != null && p.Active && p.Name == name);
-        sw.Stop();
-        plr?.SendMessage($"2.[LinQ] FirstOrDefault: [c/E24763:{sw.Elapsed}]", color);
-
-        // 3. 倒序for循环
-        sw.Restart();
-        for (int j = plrs.Length - 1; j >= 0; j--)
-        {
-            var p = plrs[j];
-            if (p != null && p.Active && p.Name == name)
-            {
-                plr = p;
-                break;
-            }
-        }
-        sw.Stop();
-        plr?.SendMessage($"3.[Loop] 倒序For循环: [c/42D295:{sw.Elapsed}]", color);
-
-        // 4. foreach循环
-        sw.Restart();
-        foreach (var p in plrs)
-        {
-            if (p != null && p.Active && p.Name == name)
-            {
-                plr = p;
-                break;
-            }
-        }
-        sw.Stop();
-        plr?.SendMessage($"4.[Loop] Foreach循环: [c/4296D2:{sw.Elapsed}]", color);
-
-        // 5. while循环
-        sw.Restart();
-        int index = 0;
-        while (index < plrs.Length)
-        {
-            var p = plrs[index];
-            if (p != null && p.Active && p.Name == name)
-            {
-                plr = p;
-                break;
-            }
-            index++;
-        }
-        sw.Stop();
-        plr?.SendMessage($"5.[Loop] While循环: [c/F36E4C:{sw.Elapsed}]", color);
-
-        // 6. Array.FindIndex
-        sw.Restart();
-        int index2 = Array.FindIndex(plrs, p => p != null && p.Active && p.Name == name);
-        plr = index2 >= 0 ? plrs[index2] : null;
-        sw.Stop();
-        plr?.SendMessage($"6.[Array] FindIndex: [c/42D297:{sw.Elapsed}]", color);
-
-        // 7. Span遍历
-        sw.Restart();
-        var span = plrs.AsSpan();
-        for (int j = 0; j < span.Length; j++)
-        {
-            var p = span[j];
-            if (p != null && p.Active && p.Name == name)
-            {
-                plr = p;
-                break;
-            }
-        }
-        sw.Stop();
-        plr?.SendMessage($"7.[Span] Span遍历: [c/4296D2:{sw.Elapsed}]", color);
-
-        // 8. Parallel并行遍历
-        sw.Restart();
-        // 用异步避免卡住主线程
-        Task.Run(() =>
-        {
-            Parallel.ForEach(Partitioner.Create(0, plrs.Length), range =>
-            {
-                for (int j = range.Item1; j < range.Item2 && plr == null; j++)
-                {
-                    var p = plrs[j];
-                    if (p != null && p.Active && p.Name == name)
-                    {
-                        plr = p;
-                    }
-                }
-            });
-        });
-        sw.Stop();
-        plr?.SendMessage($"8.[Parallel] 并行查找: [c/E34761:{sw.Elapsed}]", color);
-
-        // 9. Array.Find + 静态方法
-        sw.Restart();
-        plr = Array.Find(plrs, p => FindPlayerByName(p, name));
-        sw.Stop();
-        plr?.SendMessage($"9.[Array] Find+静态方法: [c/D242C6:{sw.Elapsed}]", color);
-
-        // 停止总计时器
-        totalSw.Stop();
-
-        plr?.SendMessage($"总计耗时: [c/F39F4C:{totalSw.Elapsed}]", color);
-        plr?.SendMessage($"已完成: 查找1次 名为[c/4296D2:{name}] 的 [c/E34761:玩家] 性能测试", color);
-    }
-
-    private static bool FindPlayerByName(TSPlayer p, string name) => p != null && p.Active && p.Name == name;
-    #endregion
-
     #region 逐行渐变色方法
     public static void GradMess(TSPlayer plr, string mess)
     {
@@ -428,40 +295,6 @@ internal class Utils
     }
     #endregion
 
-    #region 优化广播消息（处理换行符）
-    public static string BroadcastGradient(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return text;
-
-        // 按行分割，每行单独处理渐变
-        var lines = text.Split('\n');
-        var result = new StringBuilder();
-
-        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
-        {
-            string line = lines[lineIndex];
-
-            // 去除可能的回车符
-            line = line.TrimEnd('\r');
-
-            if (!string.IsNullOrEmpty(line))
-            {
-                // 对每一行进行渐变处理
-                result.Append(TextGradient(line));
-            }
-
-            // 添加换行符（除了最后一行）
-            if (lineIndex < lines.Length - 1)
-            {
-                result.Append('\n');
-            }
-        }
-
-        return result.ToString();
-    }
-    #endregion
-
     #region 返回物品图标方法
     // 方法：ItemIcon，根据给定的物品对象返回插入物品图标的格式化字符串
     public static string ItemIcon(Item item)
@@ -488,7 +321,7 @@ internal class Utils
     }
     #endregion
 
-    #region 将字符串换行
+    #region 将字符串换行（用于/scp list指令）
     public static List<string> WarpLines(List<string> lines, int column = 5)
     {
         List<string> li1 = new();
